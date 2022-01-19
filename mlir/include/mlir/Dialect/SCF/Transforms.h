@@ -171,6 +171,18 @@ void populateSCFLoopPipeliningPatterns(RewritePatternSet &patterns,
 /// loop bounds and loop steps are canonicalized.
 void populateSCFForLoopCanonicalizationPatterns(RewritePatternSet &patterns);
 
+/// Hoists non-side-effecting ops in either scf.if regions ahead of the scf.if
+/// op to enable further optimizations like DCE, etc.
+///
+/// The pattern will only hoist at non-side-effecting ops that can be hoisted
+/// out without violating IR def-use relationships. `hoistControlFn` can be used
+/// to further refine the hoisting rule. It will be invoked with the candidate
+/// op to hoist within scf.if region during pattern execution; returning true
+/// means allow hoisting.
+void populateIfRegionHoistingPatterns(
+    RewritePatternSet &patterns,
+    llvm::function_ref<bool(Operation *)> hoistControlFn);
+
 } // namespace scf
 } // namespace mlir
 

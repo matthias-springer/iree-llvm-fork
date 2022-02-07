@@ -526,34 +526,54 @@ LogicalResult scf::canonicalizeMinMaxOpInInIf(scf::IfOp ifOp,
   if (failed(collectAndCases(ifOp.getCondition(), conditions)))
     return failure();
 
-  FlatAffineValueConstraints constraints;
-  if (failed(addIfConditionConstraints(constraints, conditions, loopMatcher,
-                                       rewriter)))
+  FlatAffineValueConstraints commonConstraints;
+  if (failed(addIfConditionConstraints(commonConstraints, conditions,
+                                       loopMatcher, rewriter)))
     return failure();
 
   auto walkResult = ifOp.getThenRegion().walk(
-      [constraints, &loopMatcher, &rewriter](AffineMinOp minOp) {
+      [commonConstraints, &loopMatcher, &rewriter](Operation *op) {
         // Make a copy of the existing constraints for this affine.min op
         // specifically.
-        FlatAffineValueConstraints minConstraints(constraints);
+        FlatAffineValueConstraints constraints(commonConstraints);
         DenseSet<Value> allIvs;
 
-        for (Value operand : minOp.getOperands()) {
+        for (Value operand : op->getOperands()) {
           Value iv = operand;
           Value lb, ub, step;
           if (failed(loopMatcher(operand, lb, ub, step)))
             continue;
           allIvs.insert(iv);
 
-          if (failed(addLoopRangeConstraints(minConstraints, iv, lb, ub, step,
+          if (failed(addLoopRangeConstraints(constraints, iv, lb, ub, step,
                                              rewriter)))
             return WalkResult::interrupt();
         }
-        if (failed(canonicalizeMinMaxOp(rewriter, minOp, minOp.getAffineMap(),
-                                        minOp.getMapOperands(), /*isMin=*/true,
-                                        minConstraints))) {
-          return WalkResult::interrupt();
+
+        if (auto minOp = dyn_cast<AffineMinOp>(op)) {
+          if (failed(canonicalizeMinMaxOp(rewriter, minOp, minOp.getAffineMap(),
+                                          minOp.getMapOperands(),
+                                          /*isMin=*/true, constraints)))
+            return WalkResult::interrupt();
+        } else if (auto applyOp = dyn_cast<AffineApplyOp>(op)) {
+          if (failed(addIfConditionConstraints(constraints, applyOp.getResult(),
+                                               loopMatcher, rewriter)))
+            return WalkResult::interrupt();
+
+          unsigned resultPos;
+          constraints.findId(applyOp, &resultPos);
+          Optional<int64_t> bound = constraints.getConstantBound(
+              FlatAffineConstraints::EQ, resultPos);
+
+          if (!bound)
+            return WalkResult::advance();
+
+          OpBuilder::InsertionGuard guard(rewriter);
+          rewriter.setInsertionPoint(applyOp);
+          rewriter.replaceOpWithNewOp<arith::ConstantIndexOp>(applyOp,
+                                                              bound.getValue());
         }
+
         return WalkResult::advance();
       });
 

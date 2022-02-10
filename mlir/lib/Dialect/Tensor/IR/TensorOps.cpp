@@ -1086,6 +1086,8 @@ llvm::SmallDenseSet<unsigned> ExtractSliceOp::getDroppedDims() {
   llvm::SmallDenseSet<unsigned> droppedDims;
   ArrayRef<int64_t> resultShape = getType().getShape();
   SmallVector<OpFoldResult> mixedSizes = getMixedSizes();
+  if (resultShape.size() == mixedSizes.size())
+    return {};
   unsigned shapePos = 0;
   for (const auto &size : enumerate(mixedSizes)) {
     Optional<int64_t> sizeVal = getConstantIntValue(size.value());

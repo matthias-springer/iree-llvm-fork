@@ -213,3 +213,28 @@ func @pad_both_low_and_high_pad(%tensor: tensor<1x56x56x144xf32>, %arg0: index, 
 // CHECK-LABEL: func @pad_both_low_and_high_pad
 //       CHECK:   %[[C4:.+]] = arith.constant 4 : index
 //       CHECK:   return %[[C4]], %[[C4]]
+
+// -----
+
+func @extract_slice_same_rank(%arg0 : tensor<?x?xf32>,
+    %arg1 : index, %arg2: index) -> (index, index) {
+  %f0 = arith.constant 0.0 : f32
+  %c0 = arith.constant 0 : index
+  %c1 = arith.constant 1 : index
+  %0 = tensor.extract_slice %arg0[0, 0] [%c1, %arg1] [1, 1] :
+     tensor<?x?xf32> to tensor<?x?xf32>
+  %pad = tensor.pad %0 low[0, 0] high[0, %arg2] {
+  ^bb0(%arg3: index, %arg4: index):
+    tensor.yield %f0 : f32
+  } : tensor<?x?xf32> to tensor<?x?xf32>
+  %1 = tensor.dim %pad, %c0 : tensor<?x?xf32>
+  %2 = tensor.dim %pad, %c1 : tensor<?x?xf32>
+  return %1, %2 : index, index
+}
+
+//      CHECK: #[[MAP:.+]] = affine_map<()[s0, s1] -> (s1 + s0)>
+//      CHECK: func @extract_slice_same_rank
+// CHECK-SAME: %{{.+}}: tensor<?x?xf32>, %[[ARG1:.+]]: index, %[[ARG2:.+]]: index
+//      CHECK:   %[[DIM0:.+]] = arith.constant 1 : index
+//      CHECK:   %[[DIM1:.+]] = affine.apply #[[MAP]]()[%[[ARG2]], %[[ARG1]]]
+//      CHECK:   return %[[DIM0]], %[[DIM1]]

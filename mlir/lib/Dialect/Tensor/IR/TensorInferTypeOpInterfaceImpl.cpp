@@ -174,13 +174,35 @@ struct ReifyPadOp
     auto lowPad = padOp.getMixedLowPad();
     auto highPad = padOp.getMixedHighPad();
     SmallVector<Value> shapes;
+
+    // Try to see if the source op implements the same interface. If so we can
+    // go a step further to avoid generating dim ops, which helps to compose
+    // affine expressions during result shape simplification and make dimensions
+    // static.
+    ReifiedRankedShapedTypeDims sourceResultShapes;
+    SmallVector<Value> sourceShape;
+    auto sourceIfxOp = dyn_cast_or_null<ReifyRankedShapedTypeOpInterface>(
+        padOp.source().getDefiningOp());
+    if (sourceIfxOp &&
+        succeeded(sourceIfxOp.reifyResultShapes(b, sourceResultShapes))) {
+      int resultIndex = padOp.source().cast<OpResult>().getResultNumber();
+      sourceShape = sourceResultShapes[resultIndex];
+    }
+
     for (auto dim : llvm::seq<int64_t>(0, padOp.getSourceType().getRank())) {
       // Shape along each dimension is source dim + low pad + high pad.
       SmallVector<Value> mapOperands;
-      mapOperands.push_back(
-          b.createOrFold<tensor::DimOp>(loc, padOp.source(), dim));
+
+      Value sourceDim;
+      if (sourceShape.empty())
+        sourceDim = b.createOrFold<tensor::DimOp>(loc, padOp.source(), dim);
+      else
+        sourceDim = sourceShape[dim];
+      mapOperands.push_back(sourceDim);
+
       AffineExpr expr = b.getAffineDimExpr(0);
       unsigned numSymbols = 0;
+
       auto addOpFoldResult = [&](OpFoldResult valueOrAttr) {
         if (Value v = valueOrAttr.dyn_cast<Value>()) {
           expr = expr + b.getAffineSymbolExpr(numSymbols++);
@@ -193,8 +215,29 @@ struct ReifyPadOp
       };
       addOpFoldResult(lowPad[dim]);
       addOpFoldResult(highPad[dim]);
-      shapes.push_back(applyMapToValues(
-          b, loc, AffineMap::get(1, numSymbols, expr), mapOperands)[0]);
+
+      AffineMap map = AffineMap::get(1, numSymbols, expr);
+      fullyComposeAffineMapAndOperands(&map, &mapOperands);
+      canonicalizeMapAndOperands(&map, &mapOperands);
+
+      // Handle the case where we have both dimensions and symbols and they map
+      // to the same value, e.g.:
+      //   affine_map<(d0, s0) -> (d0 - s0 + 4)>(%v, %v).
+      // Due to the restrictions over dimensions and symbols, the above won't
+      // simplify. Try to change dimensions for symbols for such cases.
+      if (llvm::is_splat(mapOperands)) {
+        int numDims = map.getNumDims();
+        int numSyms = map.getNumSymbols();
+        DenseMap<AffineExpr, AffineExpr> dimToSymMap;
+        for (int i = 0; i < numDims; ++i) {
+          dimToSymMap[b.getAffineDimExpr(i)] =
+              b.getAffineSymbolExpr(numSyms + i);
+        }
+        map = map.replace(dimToSymMap, /*numResultDims=*/0,
+                          /*numResultSyms=*/numDims + numSyms);
+      }
+
+      shapes.push_back(applyMapToValues(b, loc, map, mapOperands)[0]);
     }
     reifiedReturnShapes.emplace_back(std::move(shapes));
     return success();

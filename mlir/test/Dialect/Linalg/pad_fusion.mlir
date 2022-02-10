@@ -1,4 +1,4 @@
-// RUN: mlir-opt -test-linalg-pad-fusion -split-input-file %s | FileCheck %s
+// RUN: mlir-opt -split-input-file -test-linalg-pad-fusion -cse %s | FileCheck %s
 
 func @dynamic_pad_fusion(%arg0 : tensor<?x?xf32>, %arg1 : index, %arg2 : index,
     %arg3 : index, %arg4 : index, %arg5 : f32) -> tensor<?x?xf32> {
@@ -33,9 +33,9 @@ func @dynamic_pad_fusion(%arg0 : tensor<?x?xf32>, %arg1 : index, %arg2 : index,
 //  CHECK-DAG:   %[[C0:.+]] = arith.constant 0 : index
 //  CHECK-DAG:   %[[C1:.+]] = arith.constant 1 : index
 //  CHECK-DAG:   %[[SOURCE:.+]] = linalg.generic
-//  CHECK-DAG:   %[[SOURCE_D0:.+]] = tensor.dim %[[SOURCE]], %[[C0]]
+//  CHECK-DAG:   %[[SOURCE_D0:.+]] = tensor.dim %[[ARG0]], %[[C0]]
 //  CHECK-DAG:   %[[TARGET_D0:.+]] = affine.apply #[[MAP]]()[%[[ARG1]], %[[ARG3]], %[[SOURCE_D0]]]
-//  CHECK-DAG:   %[[SOURCE_D1:.+]] = tensor.dim %[[SOURCE]], %[[C1]]
+//  CHECK-DAG:   %[[SOURCE_D1:.+]] = tensor.dim %[[ARG0]], %[[C1]]
 //  CHECK-DAG:   %[[TARGET_D1:.+]] = affine.apply #[[MAP]]()[%[[ARG2]], %[[ARG4]], %[[SOURCE_D1]]]
 //      CHECK:   %[[INIT:.+]] = linalg.init_tensor [%[[TARGET_D0]], %[[TARGET_D1]]] 
 //      CHECK:   %[[FILL:.+]] = linalg.fill(%[[ARG5]], %[[INIT]])
@@ -79,7 +79,7 @@ func @mixed_pad_fusion(%arg0 : tensor<?x42xf32>, %arg1 : index, %arg2 : index,
 //  CHECK-DAG:   %[[C0:.+]] = arith.constant 0 : index
 //  CHECK-DAG:   %[[C1:.+]] = arith.constant 1 : index
 //  CHECK-DAG:   %[[SOURCE:.+]] = linalg.generic
-//  CHECK-DAG:   %[[SOURCE_D1:.+]] = tensor.dim %[[SOURCE]], %[[C1]]
+//  CHECK-DAG:   %[[SOURCE_D1:.+]] = tensor.dim %[[ARG0]], %[[C0]]
 //  CHECK-DAG:   %[[TARGET_D1:.+]] = affine.apply #[[MAP]]()[%[[ARG1]], %[[ARG2]], %[[SOURCE_D1]]]
 //      CHECK:   %[[INIT:.+]] = linalg.init_tensor [49, %[[TARGET_D1]]] 
 //      CHECK:   %[[FILL:.+]] = linalg.fill(%[[ARG3]], %[[INIT]])

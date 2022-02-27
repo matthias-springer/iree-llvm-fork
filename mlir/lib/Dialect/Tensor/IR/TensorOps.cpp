@@ -1955,6 +1955,88 @@ OpFoldResult SplatOp::fold(ArrayRef<Attribute> operands) {
 }
 
 //===----------------------------------------------------------------------===//
+// TransposeOp
+//===----------------------------------------------------------------------===//
+
+/// Build a strided memref type by applying `permutationMap` tp `tensorType`.
+static RankedTensorType inferTransposeResultType(RankedTensorType tensorType,
+                                                 AffineMap permutationMap) {
+  auto rank = tensorType.getRank();
+  auto sourceShape = tensorType.getShape();
+  // Compute permuted sizes.
+  SmallVector<int64_t, 4> destShape(rank, 0);
+  for (const auto &kv : llvm::enumerate(permutationMap.getResults()))
+    destShape[kv.index()] =
+        sourceShape[kv.value().cast<AffineDimExpr>().getPosition()];
+
+  return RankedTensorType::get(destShape, tensorType.getElementType(),
+                               tensorType.getEncoding());
+}
+
+void TransposeOp::build(OpBuilder &b, OperationState &result, Value input,
+                        AffineMapAttr permutation,
+                        ArrayRef<NamedAttribute> attrs) {
+  auto permutationMap = permutation.getValue();
+  assert(permutationMap);
+
+  auto tensorType = input.getType().cast<RankedTensorType>();
+  // Compute result type.
+  RankedTensorType resultType =
+      inferTransposeResultType(tensorType, permutationMap);
+
+  build(b, result, resultType, input, attrs);
+  result.addAttribute(TransposeOp::getPermutationAttrName(), permutation);
+}
+
+// tensor.transpose $in $permutation attr-dict : type($in) `to` type(results)
+void TransposeOp::print(OpAsmPrinter &p) {
+  p << " " << input() << " " << permutation();
+  p.printOptionalAttrDict((*this)->getAttrs(), {getPermutationAttrName()});
+  p << " : " << input().getType() << " to " << getType();
+}
+
+ParseResult TransposeOp::parse(OpAsmParser &parser, OperationState &result) {
+  OpAsmParser::OperandType input;
+  AffineMap permutation;
+  RankedTensorType srcType, dstType;
+  if (parser.parseOperand(input) || parser.parseAffineMap(permutation) ||
+      parser.parseOptionalAttrDict(result.attributes) ||
+      parser.parseColonType(srcType) ||
+      parser.resolveOperand(input, srcType, result.operands) ||
+      parser.parseKeywordType("to", dstType) ||
+      parser.addTypeToList(dstType, result.types))
+    return failure();
+
+  result.addAttribute(TransposeOp::getPermutationAttrName(),
+                      AffineMapAttr::get(permutation));
+  return success();
+}
+
+LogicalResult TransposeOp::verify() {
+  if (!permutation().isPermutation())
+    return emitOpError("expected a permutation map");
+  if (permutation().getNumDims() != getResultTensorType().getRank())
+    return emitOpError("expected a permutation map of same rank as the input");
+
+  auto srcType = input().getType().cast<RankedTensorType>();
+  auto dstType = getResultTensorType();
+  auto expectedType = inferTransposeResultType(srcType, permutation());
+  if (dstType != expectedType)
+    return emitOpError("transposed input type should be ")
+           << expectedType << " but found " << dstType;
+  return success();
+}
+
+OpFoldResult TransposeOp::fold(ArrayRef<Attribute>) {
+  if (permutation().isIdentity())
+    return input(); // Identity transpose.
+  if (auto inputT = input().getDefiningOp<TransposeOp>())
+    if (permutation().compose(inputT.permutation()).isIdentity())
+      return inputT.input(); // Reverse transpose.
+  return {};
+}
+
+//===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
 

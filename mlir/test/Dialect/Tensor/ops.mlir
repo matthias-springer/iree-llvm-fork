@@ -255,8 +255,26 @@ func @pad_to_static_size(%arg0: tensor<?x?xf32>, %ub0: index, %ub1: index,
 func @test_splat_op(%s : f32) {
   // CHECK: tensor.splat [[S]] : tensor<8xf32>
   %v = tensor.splat %s : tensor<8xf32>
-  
+
   // CHECK: tensor.splat [[S]] : tensor<4xf32>
   %u = "tensor.splat"(%s) : (f32) -> tensor<4xf32>
   return
+}
+
+// -----
+
+// CHECK-LABEL: func @transpose_static_shape
+func @transpose_static_shape(%input: tensor<3x4xf32>) -> tensor<4x3xf32> {
+  // CHECK: tensor.transpose %{{.+}} (d0, d1) -> (d1, d0) : tensor<3x4xf32> to tensor<4x3xf32>
+  %0 = tensor.transpose %input (i, j) -> (j, i) : tensor<3x4xf32> to tensor<4x3xf32>
+  return %0 : tensor<4x3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @transpose_dynamic_shape
+func @transpose_dynamic_shape(%input: tensor<5x?x8x?xf32>) -> tensor<?x8x5x?xf32> {
+  // CHECK: tensor.transpose %{{.+}} (d0, d1, d2, d3) -> (d3, d2, d0, d1) : tensor<5x?x8x?xf32> to tensor<?x8x5x?xf32>
+  %0 = tensor.transpose %input (i, j, k, l) -> (l, k, i, j) : tensor<5x?x8x?xf32> to tensor<?x8x5x?xf32>
+  return %0 : tensor<?x8x5x?xf32>
 }

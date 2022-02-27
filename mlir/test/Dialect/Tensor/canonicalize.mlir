@@ -1258,3 +1258,35 @@ func @insert_slice_cast(%arg0 : tensor<1x?xf32>, %arg1 : tensor<?x?xf32>, %arg2 
   // CHECK: return %[[RES]] : tensor<?x?xf32>
   return %1 : tensor<?x?xf32>
 }
+
+// -----
+
+// CHECK-LABEL: func @identity_transpose
+//  CHECK-SAME: (%[[INPUT:.+]]: tensor<5x?x8x?xf32>)
+func @identity_transpose(%input: tensor<5x?x8x?xf32>) -> tensor<5x?x8x?xf32> {
+  %0 = tensor.transpose %input (i, j, k, l) -> (i, j, k, l) : tensor<5x?x8x?xf32> to tensor<5x?x8x?xf32>
+  // CHECK: return %[[INPUT]]
+  return %0 : tensor<5x?x8x?xf32>
+}
+
+// -----
+
+// Same operand and result type but not identity permutation.
+
+// CHECK-LABEL: func @same_type_transpose
+func @same_type_transpose(%input: tensor<5x?x8x?xf32>) -> tensor<5x?x8x?xf32> {
+  // CHECK: tensor.transpose %{{.+}} (d0, d1, d2, d3) -> (d0, d3, d2, d1)
+  %0 = tensor.transpose %input (i, j, k, l) -> (i, l, k, j) : tensor<5x?x8x?xf32> to tensor<5x?x8x?xf32>
+  return %0 : tensor<5x?x8x?xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @reverse_transpose
+//  CHECK-SAME: (%[[INPUT:.+]]: tensor<3x4x5xf32>)
+func @reverse_transpose(%input: tensor<3x4x5xf32>) -> tensor<3x4x5xf32> {
+  %0 = tensor.transpose %input (i, j, k) -> (k, i, j) : tensor<3x4x5xf32> to tensor<5x3x4xf32>
+  %1 = tensor.transpose %0 (i, j, k) -> (j, k, i) : tensor<5x3x4xf32> to tensor<3x4x5xf32>
+  // CHECK: return %[[INPUT]]
+  return %1 : tensor<3x4x5xf32>
+}

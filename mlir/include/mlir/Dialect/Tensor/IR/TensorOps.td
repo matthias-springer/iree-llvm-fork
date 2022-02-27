@@ -1033,6 +1033,42 @@ def Tensor_SplatOp : Tensor_Op<"splat", [
 }
 
 //===----------------------------------------------------------------------===//
+// TransposeOp
+//===----------------------------------------------------------------------===//
+
+def Tensor_TransposeOp : Tensor_Op<"transpose", [NoSideEffect]> {
+  let summary = "Transpose tensor dimensions";
+  let description = [{
+    Transposes the given tensor with a known rank according to a permutation map.
+
+    Example:
+
+    ```mlir
+    %1 = tensor.transpose %0 (i, j) -> (j, i) : tensor<4x3xf32> to tensor<3x4xf32>
+    ```
+  }];
+
+  let arguments = (ins AnyRankedTensor:$input, AffineMapAttr:$permutation);
+  let results = (outs AnyRankedTensor:$output);
+
+  let builders = [
+    OpBuilder<(ins "Value":$input, "AffineMapAttr":$permutation,
+                   CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>
+  ];
+
+  let extraClassDeclaration = [{
+    static StringRef getPermutationAttrName() { return "permutation"; }
+    RankedTensorType getResultTensorType() {
+      return getType().cast<RankedTensorType>();
+    }
+  }];
+
+  let hasCustomAssemblyFormat = 1;
+  let hasFolder = 1;
+  let hasVerifier = 1;
+}
+
+//===----------------------------------------------------------------------===//
 // YieldOp
 //===----------------------------------------------------------------------===//
 

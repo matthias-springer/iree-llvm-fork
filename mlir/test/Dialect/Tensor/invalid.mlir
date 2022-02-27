@@ -378,3 +378,30 @@ func @invalid_splat(%v : vector<8xf32>) {
   %w = tensor.splat %v : tensor<8xvector<8xf32>>
   return
 }
+
+// -----
+
+// CHECK-LABEL: func @transpose_not_permutation
+func @transpose_not_permutation(%input: tensor<3x4xf32>) -> tensor<4x3xf32> {
+  // expected-error@+1 {{expected a permutation map}}
+  %0 = tensor.transpose %input (i, j) -> (j, j) : tensor<3x4xf32> to tensor<4x3xf32>
+  return %0 : tensor<4x3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @transpose_rank_mismatch
+func @transpose_rank_mismatch(%input: tensor<3x4xf32>) -> tensor<4x3xf32> {
+  // expected-error@+1 {{expected a permutation map of same rank as the input}}
+  %0 = tensor.transpose %input (i, j, k) -> (j, i, k) : tensor<3x4xf32> to tensor<4x3xf32>
+  return %0 : tensor<4x3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @transpose_wrong_result_type
+func @transpose_wrong_result_type(%input: tensor<3x4xf32>) -> tensor<3x4xf32> {
+  // expected-error@+1 {{transposed input type should be 'tensor<4x3xf32>' but found 'tensor<3x4xf32>'}}
+  %0 = tensor.transpose %input (i, j) -> (j, i) : tensor<3x4xf32> to tensor<3x4xf32>
+  return %0 : tensor<3x4xf32>
+}

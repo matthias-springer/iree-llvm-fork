@@ -177,3 +177,47 @@ func @clamp_ulessthanequal(%input: i32, %min: i32, %max: i32) -> i32 {
   // CHECK-NEXT: spv.ReturnValue [[RES]]
   spv.ReturnValue %2 : i32
 }
+
+// -----
+
+// CHECK-LABEL: func @splat_fma
+//  CHECK-SAME: (%[[A:.+]]: vector<3xf32>, %[[SCALAR:.+]]: f32, %[[C:.+]]: vector<3xf32>) -> vector<3xf32> {
+func @splat_fma(%a : vector<3xf32>, %scalar: f32, %c: vector<3xf32>) -> vector<3xf32> {
+  %b = spv.CompositeConstruct %scalar, %scalar, %scalar : vector<3xf32>
+  // CHEKCK: %[[MUL:.+]] = spv.VectorTimesScalar %[[A]], %[[SCALAR]] : (vector<3xf32>, f32) -> vector<3xf32>
+  // CHEKCK: %[[ADD:.+]] = spv.FAdd %[[MUL]], %[[C]] : vector<3xf32>
+  %0 = spv.GLSL.Fma %a, %b, %c : vector<3xf32>
+  // CHEKCK: return %[[ADD]]
+  return %0 : vector<3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @splat_fma
+func @splat_fma(%b : vector<3xf32>, %scalar: f32, %c: vector<3xf32>) -> vector<3xf32> {
+  %a = spv.CompositeConstruct %scalar, %scalar, %scalar : vector<3xf32>
+  // CHECK: spv.VectorTimesScalar
+  // CHECK: spv.FAdd
+  %0 = spv.GLSL.Fma %a, %b, %c : vector<3xf32>
+  return %0 : vector<3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @splat_fma_no_contraction
+func @splat_fma_no_contraction(%a : vector<3xf32>, %scalar: f32, %c: vector<3xf32>) -> vector<3xf32> {
+  %b = spv.CompositeConstruct %scalar, %scalar, %scalar : vector<3xf32>
+  // CHECK: spv.GLSL.Fma
+  %0 = spv.GLSL.Fma %a, %b, %c {NoContraction} : vector<3xf32>
+  return %0 : vector<3xf32>
+}
+
+// -----
+
+// CHECK-LABEL: func @not_splat_fma
+func @not_splat_fma(%a : vector<3xf32>, %s0: f32, %s1: f32, %c: vector<3xf32>) -> vector<3xf32> {
+  %b = spv.CompositeConstruct %s1, %s0, %s1 : vector<3xf32>
+  // CHECK: spv.GLSL.Fma
+  %0 = spv.GLSL.Fma %a, %b, %c : vector<3xf32>
+  return %0 : vector<3xf32>
+}

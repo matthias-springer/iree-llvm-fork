@@ -95,6 +95,8 @@ static Value getMemRefOperand(LoadOrStoreOpTy op) {
   return op.memref();
 }
 
+static Value getMemRefOperand(vector::LoadOp op) { return op.base(); }
+
 static Value getMemRefOperand(vector::TransferReadOp op) { return op.source(); }
 
 static Value getMemRefOperand(vector::TransferWriteOp op) {
@@ -161,6 +163,14 @@ void LoadOpOfSubViewFolder<LoadOpTy>::replaceOp(
     PatternRewriter &rewriter) const {
   rewriter.replaceOpWithNewOp<LoadOpTy>(loadOp, subViewOp.source(),
                                         sourceIndices);
+}
+
+template <>
+void LoadOpOfSubViewFolder<vector::LoadOp>::replaceOp(
+    vector::LoadOp loadOp, memref::SubViewOp subViewOp,
+    ArrayRef<Value> sourceIndices, PatternRewriter &rewriter) const {
+  rewriter.replaceOpWithNewOp<vector::LoadOp>(
+      loadOp, loadOp.getVectorType(), subViewOp.source(), sourceIndices);
 }
 
 template <>
@@ -242,6 +252,7 @@ StoreOpOfSubViewFolder<OpTy>::matchAndRewrite(OpTy storeOp,
 void memref::populateFoldSubViewOpPatterns(RewritePatternSet &patterns) {
   patterns.add<LoadOpOfSubViewFolder<AffineLoadOp>,
                LoadOpOfSubViewFolder<memref::LoadOp>,
+               LoadOpOfSubViewFolder<vector::LoadOp>,
                LoadOpOfSubViewFolder<vector::TransferReadOp>,
                StoreOpOfSubViewFolder<AffineStoreOp>,
                StoreOpOfSubViewFolder<memref::StoreOp>,

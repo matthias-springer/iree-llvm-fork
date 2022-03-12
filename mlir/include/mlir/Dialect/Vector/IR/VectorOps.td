@@ -1491,24 +1491,23 @@ def Vector_TransferWriteOp :
 }
 
 def Vector_LoadOp : Vector_Op<"load"> {
-  let summary = "reads an n-D slice of memory into an n-D vector";
+  let summary = "reads an n-D tensor/memref into an k-D vector";
   let description = [{
-    The 'vector.load' operation reads an n-D slice of memory into an n-D
-    vector. It takes a 'base' memref, an index for each memref dimension and a
+    The 'vector.load' operation reads an n-D tensor/memref into an k-D (k < n)
+    vector. It takes a 'base' tensor/memref, an index for each dimension and a
     result vector type as arguments. It returns a value of the result vector
-    type. The 'base' memref and indices determine the start memory address from
-    which to read. Each index provides an offset for each memref dimension
-    based on the element type of the memref. The shape of the result vector
-    type determines the shape of the slice read from the start memory address.
-    The elements along each dimension of the slice are strided by the memref
-    strides. Only unit strides are allowed along the most minor memref
-    dimension. These constraints guarantee that elements read along the first
-    dimension of the slice are contiguous in memory.
+    type. The 'base' tensor/memref and indices determine the start address from
+    which to read. Each index provides an offset for each dimension based on the
+    element type of the tensor/memref. The shape of the result vector type
+    determines the shape of the slice read from the start address. For memref,
+    the elements along each dimension of the slice are strided per the memref
+    strides. Only unit strides are allowed along the most minor memref dimension.
+    These constraints guarantee that elements read along the innermost dimension
+    of the slice are contiguous in memory.
 
-    The memref element type can be a scalar or a vector type. If the memref
-    element type is a scalar, it should match the element type of the result
-    vector. If the memref element type is vector, it should match the result
-    vector type.
+    The element type can be a scalar or a vector type. If the element type is a
+    scalar, it should match the element type of the result vector. If the element
+    type is vector, it should match the result vector type.
 
     Example 1: 1-D vector load on a scalar memref.
     ```mlir
@@ -1531,10 +1530,10 @@ def Vector_LoadOp : Vector_Op<"load"> {
     ```
 
     Representation-wise, the 'vector.load' operation permits out-of-bounds
-    reads. Support and implementation of out-of-bounds vector loads is
-    target-specific. No assumptions should be made on the value of elements
-    loaded out of bounds. Not all targets may support out-of-bounds vector
-    loads.
+    reads only for memref. Support and implementation of out-of-bounds vector
+    loads is target-specific. No assumptions should be made on the value of
+    elements loaded out of bounds. Not all targets may support out-of-bounds
+    vector loads.
 
     Example 5:  Potential out-of-bound vector load.
     ```mlir
@@ -1547,14 +1546,19 @@ def Vector_LoadOp : Vector_Op<"load"> {
     ```
   }];
 
-  let arguments = (ins Arg<AnyMemRef, "the reference to load from",
-      [MemRead]>:$base,
-      Variadic<Index>:$indices);
+  let arguments = (ins Arg<AnyShaped, "the reference to load from">:$base,
+                       Variadic<Index>:$indices);
   let results = (outs AnyVector:$result);
 
   let extraClassDeclaration = [{
+    ShapedType getShapedType() {
+      return base().getType().cast<ShapedType>();
+    }
+    TensorType getTensorType() {
+      return base().getType().dyn_cast<TensorType>();
+    }
     MemRefType getMemRefType() {
-      return base().getType().cast<MemRefType>();
+      return base().getType().dyn_cast<MemRefType>();
     }
 
     VectorType getVectorType() {

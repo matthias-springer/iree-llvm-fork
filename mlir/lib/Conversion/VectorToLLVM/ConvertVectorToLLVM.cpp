@@ -230,6 +230,8 @@ public:
 
     auto loc = loadOrStoreOp->getLoc();
     MemRefType memRefTy = loadOrStoreOp.getMemRefType();
+    if (!memRefTy)
+      return failure();
 
     // Resolve alignment.
     unsigned align;

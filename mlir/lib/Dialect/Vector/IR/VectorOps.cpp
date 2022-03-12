@@ -3471,8 +3471,13 @@ static LogicalResult verifyLoadStoreMemRefLayout(Operation *op,
 
 LogicalResult vector::LoadOp::verify() {
   VectorType resVecTy = getVectorType();
-  MemRefType memRefTy = getMemRefType();
+  ShapedType shapedTy = getShapedType();
 
+  if (auto tensorTy = shapedTy.dyn_cast<RankedTensorType>()) {
+    return success();
+  }
+
+  MemRefType memRefTy = shapedTy.cast<MemRefType>();
   if (failed(verifyLoadStoreMemRefLayout(*this, memRefTy)))
     return failure();
 

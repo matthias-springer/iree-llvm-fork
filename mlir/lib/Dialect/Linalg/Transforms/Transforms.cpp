@@ -956,19 +956,26 @@ namespace {
 
 /// Rewrites 2-D convolution ops with size-1 window dimensions into 1-D
 /// convolution ops.
-struct DownscaleSizeOneWindowed2DConvolution final
-    : public OpRewritePattern<Conv2DNhwcHwcfOp> {
+struct DownscaleSizeOneWindowed2DConvolution final : public RewritePattern {
   DownscaleSizeOneWindowed2DConvolution(
       MLIRContext *context,
       LinalgTransformationFilter f = LinalgTransformationFilter(),
       PatternBenefit benefit = 1)
-      : OpRewritePattern<Conv2DNhwcHwcfOp>(context, benefit),
+      : RewritePattern(MatchAnyOpTypeTag(), benefit, context),
         filter(std::move(f)) {}
 
-  LogicalResult matchAndRewrite(linalg::Conv2DNhwcHwcfOp convOp,
+  LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
-    if (failed(filter.checkAndNotify(rewriter, convOp)))
+
+    if (!isa<LinalgOp>(op))
       return failure();
+    if (failed(filter.checkAndNotify(rewriter, op)))
+      return failure();
+    auto convOp = dyn_cast<Conv2DNhwcHwcfOp>(op);
+    if (!convOp) {
+      filter.replaceLinalgTransformationFilter(rewriter, op);
+      return failure();
+    }
     if (convOp.hasBufferSemantics())
       return failure(); // To be implemented
 

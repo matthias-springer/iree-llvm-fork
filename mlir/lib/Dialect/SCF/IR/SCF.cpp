@@ -1134,8 +1134,12 @@ ParseResult ForeachThreadOp::parse(OpAsmParser &parser,
 // Bodyless builder, result types must be specified.
 void ForeachThreadOp::build(mlir::OpBuilder &builder,
                             mlir::OperationState &result, TypeRange resultTypes,
-                            ValueRange numThreads) {
+                            ValueRange numThreads,
+                            ArrayRef<int64_t> threadDimMapping) {
   result.addOperands(numThreads);
+  result.addAttribute(
+      // TODO: getThreadDimMappingAttrName() but it is not a static member.
+      "thread_dim_mapping", builder.getI64ArrayAttr(threadDimMapping));
 
   Region *bodyRegion = result.addRegion();
   OpBuilder::InsertionGuard g(builder);
@@ -1155,9 +1159,12 @@ void ForeachThreadOp::build(mlir::OpBuilder &builder,
 // the terminator.
 void ForeachThreadOp::build(
     mlir::OpBuilder &builder, mlir::OperationState &result,
-    ValueRange numThreads,
+    ValueRange numThreads, ArrayRef<int64_t> threadDimMapping,
     function_ref<void(OpBuilder &, Location, ValueRange)> bodyBuilder) {
   result.addOperands(numThreads);
+  result.addAttribute(
+      // TODO: getThreadDimMappingAttrName() but it is not a static member.
+      "thread_dim_mapping", builder.getI64ArrayAttr(threadDimMapping));
 
   OpBuilder::InsertionGuard g(builder);
   Region *bodyRegion = result.addRegion();

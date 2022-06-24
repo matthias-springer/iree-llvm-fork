@@ -399,7 +399,8 @@ def ForeachThreadOp : SCF_Op<"foreach_thread", [
     //
     ```
   }];
-  let arguments = (ins Variadic<Index>:$num_threads);
+  let arguments = (ins Variadic<Index>:$num_threads,
+                   DefaultValuedAttr<I64ArrayAttr, "{}">:$thread_dim_mapping);
 
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region SizedRegion<1>:$region);
@@ -411,11 +412,13 @@ def ForeachThreadOp : SCF_Op<"foreach_thread", [
   let skipDefaultBuilders = 1;
   let builders = [
     // Bodyless builder, result types must be specified.
-    OpBuilder<(ins "TypeRange":$resultTypes, "ValueRange":$num_threads)>,
+    OpBuilder<(ins "TypeRange":$resultTypes, "ValueRange":$num_threads, 
+                   "ArrayRef<int64_t>":$thread_dim_mapping)>,
     // Builder that takes a bodyBuilder lambda, result types are inferred from
     // the terminator.
-    OpBuilder<(ins "ValueRange":$num_threads,
-              "function_ref<void(OpBuilder &, Location, ValueRange)>":$bodyBuilder)>
+    OpBuilder<(ins "ValueRange":$num_threads, 
+                   "ArrayRef<int64_t>":$thread_dim_mapping, 
+                   "function_ref<void(OpBuilder &, Location, ValueRange)>":$bodyBuilder)>
   ];
   let extraClassDeclaration = [{
     int64_t getRank() { return getNumThreads().size(); }

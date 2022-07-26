@@ -115,6 +115,26 @@ def mmt4d(lhs=TensorDef(TV.LhsType, S.M, S.K, S.M0, S.K0),
       TV.AccumType, lhs[D.m, D.k, D.m0, D.k0]) * TypeFn.cast_signed(
           TV.AccumType, rhs[D.n, D.k, D.n0, D.k0])
 
+@linalg_structured_op
+def mtm4d(lhs=TensorDef(TV.LhsType, S.M, S.K, S.K0, S.M0),
+          rhs=TensorDef(TV.RhsType, S.N, S.K, S.K0, S.N0),
+          accum=TensorDef(TV.AccumType, S.M, S.N, S.M0, S.N0, output=True)):
+  """Performs a matrix-transpose-matrix multiplication of two 4D inputs.
+
+    Differences from linalg.matmul:
+    * The left hand side is transposed, whence the 't' in 'mtm'.
+    * The input and output tensors have a 4D shape instead of a 2D shape. They
+      are interpreted as 2D matrices with one level of 2D tile subdivision,
+      whence the 2+2=4 dimensions. The inner tile dimensions are identified with
+      '0' suffixes below, for instance the LHS matrix shape (K, M, K0, M0) reads
+      as: KxM tiles, each of shape K0xM0.
+  """
+  domain(D.m, D.n, D.k, D.m0, D.n0, D.k0)
+  implements(ContractionOpInterface)
+  accum[D.m, D.n, D.m0, D.n0] += TypeFn.cast_signed(
+      TV.AccumType, lhs[D.m, D.k, D.k0, D.m0]) * TypeFn.cast_signed(
+          TV.AccumType, rhs[D.n, D.k, D.k0, D.n0])
+
 
 @linalg_structured_op
 def batch_matmul(A=TensorDef(T1, Batch, S.M, S.K),

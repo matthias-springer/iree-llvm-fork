@@ -274,18 +274,7 @@ void MapMemRefStorageClassPass::runOnOperation() {
   Operation *op = getOperation();
 
   auto target = spirv::getMemorySpaceToStorageClassTarget(*context);
-
   spirv::MemorySpaceToStorageClassConverter converter(memorySpaceMap);
-  // Use UnrealizedConversionCast as the bridge so that we don't need to pull in
-  // patterns for other dialects.
-  auto addUnrealizedCast = [](OpBuilder &builder, Type type, ValueRange inputs,
-                              Location loc) {
-    auto cast = builder.create<UnrealizedConversionCastOp>(loc, type, inputs);
-    return Optional<Value>(cast.getResult(0));
-  };
-  converter.addSourceMaterialization(addUnrealizedCast);
-  converter.addTargetMaterialization(addUnrealizedCast);
-  target->addLegalOp<UnrealizedConversionCastOp>();
 
   RewritePatternSet patterns(context);
   spirv::populateMemorySpaceToStorageClassPatterns(converter, patterns);

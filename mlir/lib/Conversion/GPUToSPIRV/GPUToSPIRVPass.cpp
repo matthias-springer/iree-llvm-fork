@@ -62,7 +62,7 @@ void GPUToSPIRVPass::runOnOperation() {
   // Map MemRef memory space to SPIR-V sotrage class first if requested.
   if (mapMemorySpace) {
     auto target = spirv::getMemorySpaceToStorageClassTarget(*context);
-    auto memorySpaceMap = spirv::getDefaultVulkanStorageClassMap();
+    auto memorySpaceMap = spirv::mapMemorySpaceToStorageClassForVulkan;
     spirv::MemorySpaceToStorageClassConverter converter(memorySpaceMap);
 
     RewritePatternSet patterns(context);

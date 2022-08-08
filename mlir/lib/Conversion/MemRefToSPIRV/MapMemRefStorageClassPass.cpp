@@ -279,7 +279,7 @@ void MapMemRefStorageClassPass::runOnOperation() {
   RewritePatternSet patterns(context);
   spirv::populateMemorySpaceToStorageClassPatterns(converter, patterns);
 
-  if (failed(applyPartialConversion(op, *target, std::move(patterns))))
+  if (failed(applyFullConversion(op, *target, std::move(patterns))))
     return signalPassFailure();
 }
 

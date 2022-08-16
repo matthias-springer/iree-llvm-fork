@@ -21,6 +21,7 @@
 #include "mlir/Parser/Parser.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "llvm/ADT/StringSet.h"
+#include <thread>
 
 using namespace mlir;
 using namespace mlir::linalg;
@@ -244,7 +245,7 @@ static FailureOr<SmallVector<Operation *>> tileAndFuse(Operation *producerOp,
 
   SmallVector<Value> destinationOperands =
       tileableProducer.getDestinationOperands(rewriter);
-
+ 
   // Try to fuse the producer in-place.
   SmallVector<Operation *> fusedOps;
   for (tensor::ExtractSliceOp sliceOp : sliceOps) {
@@ -257,6 +258,7 @@ static FailureOr<SmallVector<Operation *>> tileAndFuse(Operation *producerOp,
         sliceOp.getMixedOffsets(), sliceOp.getMixedSizes(), true);
     if (failed(tiledProducer))
       return failure();
+      
     fusedOps.push_back(tiledProducer->getDefiningOp());
   }
 
@@ -283,6 +285,9 @@ cloneAndFuse(Operation *producerOp, Operation *containingOp,
   // Clone and fuse inside the containing op.
   SmallVector<Operation *> fusedOps;
   for (OpOperand *use : uses) {
+    // Parallel insert slice is not a valid clone destination.
+    if (isa<tensor::ParallelInsertSliceOp>(use->getOwner()))
+      return failure();
     unsigned resultNumber = use->get().cast<OpResult>().getResultNumber();
     OpBuilder::InsertionGuard guard(rewriter);
     rewriter.setInsertionPoint(use->getOwner());
@@ -369,7 +374,7 @@ transform::FuseIntoContainingOp::apply(transform::TransformResults &results,
       return DiagnosedSilenceableFailure::silenceableFailure(std::move(diag));
     }
   }
-
+  
   results.set(getFusedOp().cast<OpResult>(), fusedOps);
   return DiagnosedSilenceableFailure::success();
 }

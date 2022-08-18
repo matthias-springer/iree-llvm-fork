@@ -66,6 +66,9 @@ struct TestLinalgTransforms
       *this, "test-tile-and-distribute-options",
       llvm::cl::desc("Test tile and distribute options"),
       llvm::cl::init(false)};
+  Option<bool> testTileAndFusePatterns{
+      *this, "test-tile-and-fuse-on-tensors-patters",
+      llvm::cl::desc("Tile tile and fuse on tensors"), llvm::cl::init(false)};
   Option<bool> testTileFuseAndDistributionOptions{
       *this, "test-tile-fuse-and-distribute-options",
       llvm::cl::desc("Test tile, fuse and distribute options"),
@@ -419,6 +422,16 @@ static void fillTileAndDistributePatterns(MLIRContext *context,
   }
 }
 
+static void fillTileAndFusePatterns(MLIRContext *context,
+                                    RewritePatternSet &patterns) {
+  patterns.add<LinalgTileAndFuseTensorOpsPattern>(
+      GenericOp::getOperationName(), context,
+      LinalgTilingAndFusionOptions().setTileSizes({3}),
+      LinalgTransformationFilter(
+          StringAttr::get(context, "tensor_fuse_err"),
+          StringAttr::get(context, "tensor_fuse_err_after")));
+}
+
 static void fillTileFuseAndDistributePatterns(MLIRContext *context,
                                               RewritePatternSet &patterns) {
   LinalgLoopDistributionOptions cyclicNprocsEqNiters;
@@ -536,6 +549,12 @@ void TestLinalgTransforms::runOnOperation() {
   if (testTileAndDistributionOptions) {
     RewritePatternSet patterns(&getContext());
     fillTileAndDistributePatterns(&getContext(), patterns);
+    (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
+    return;
+  }
+  if (testTileAndFusePatterns) {
+    RewritePatternSet patterns(&getContext());
+    fillTileAndFusePatterns(&getContext(), patterns);
     (void)applyPatternsAndFoldGreedily(getOperation(), std::move(patterns));
     return;
   }

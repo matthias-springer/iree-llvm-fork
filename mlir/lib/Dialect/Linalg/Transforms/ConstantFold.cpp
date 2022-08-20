@@ -123,9 +123,7 @@ public:
     // Identified this as a potential candidate for folding. Now check the
     // policy to see whether we are allowed to proceed.
     for (int i = 0; i < numInputs; ++i) {
-      OpOperand *consumer = genericOp.getInputOperand(i);
-      OpResult producer = consumer->get().cast<OpResult>();
-      if (!controlFn(producer, *consumer))
+      if (!controlFn(genericOp.getInputOperand(i)))
         return failure();
     }
 

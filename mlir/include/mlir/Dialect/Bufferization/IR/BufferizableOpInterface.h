@@ -301,7 +301,7 @@ struct BufferizationOptions {
 
 /// Specify fine-grain relationship between buffers to enable more analysis.
 enum class BufferRelation {
-  None,
+  Unknown,
   // TODO: ResultContainsOperand,
   // TODO: OperandContainsResult,
   Equivalent

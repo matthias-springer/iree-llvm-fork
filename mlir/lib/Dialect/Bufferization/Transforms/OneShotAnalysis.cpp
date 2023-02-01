@@ -948,16 +948,24 @@ static LogicalResult inPlaceAnalysis(Operation *op,
 static void equivalenceAnalysis(SmallVector<Operation *> &ops,
                                 BufferizationAliasInfo &aliasInfo,
                                 AnalysisState &state) {
-  for (Operation *op : ops)
-    if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op))
-      for (OpResult opResult : op->getOpResults())
-        if (opResult.getType().isa<TensorType>())
-          for (OpOperand *opOperand :
-               bufferizableOp.getAliasingOpOperands(opResult, state))
-            if (state.isInPlace(*opOperand))
-              if (bufferizableOp.bufferRelation(opResult, state) ==
-                  BufferRelation::Equivalent)
-                aliasInfo.unionEquivalenceClasses(opResult, opOperand->get());
+  for (Operation *op : ops) {
+    if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op)) {
+      for (OpOperand &opOperand : op->getOpOperands()) {
+        if (opOperand.get().getType().isa<TensorType>()) {
+          if (!state.isInPlace(opOperand))
+            // Out-of-place OpOperands bufferize to new allocations and do not
+            // union equivalence sets.
+            continue;
+          AliasingOpResultList aliases = state.getAliasingOpResults(opOperand);
+          for (OpResult alias : aliases) {
+            if (cast<BufferizableOpInterface>(alias.getDefiningOp())
+                    .bufferRelation(alias, state) == BufferRelation::Equivalent)
+              aliasInfo.unionEquivalenceClasses(alias, opOperand.get());
+          }
+        }
+      }
+    }
+  }
 }
 
 /// Analyze equivalence of tied OpResult/OpOperand pairs of all ops contained
@@ -969,7 +977,7 @@ static void equivalenceAnalysis(Operation *op,
   SmallVector<Operation *> ops;
   op->walk<WalkOrder::PostOrder>([&](Operation *op) {
     // No tensors => no buffers.
-    if (none_of(op->getResultTypes(), isaTensor))
+    if (none_of(op->getOperandTypes(), isaTensor))
       return;
     ops.push_back(op);
   });

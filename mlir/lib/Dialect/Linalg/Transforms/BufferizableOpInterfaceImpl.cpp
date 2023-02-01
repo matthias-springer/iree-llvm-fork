@@ -102,8 +102,8 @@ struct LinalgOpInterface
   bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
                                const AnalysisState &state) const {
     // Operand is written to if it has an aliasing OpResult.
-    auto bufferizableOp = cast<BufferizableOpInterface>(op);
-    return !bufferizableOp.getAliasingOpResult(opOperand, state).empty();
+    auto dpsOp = cast<DestinationStyleOpInterface>(op);
+    return dpsOp.isDpsInit(&opOperand);
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,

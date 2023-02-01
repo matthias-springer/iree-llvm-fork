@@ -26,6 +26,34 @@ namespace mlir {
 namespace sparse_tensor {
 namespace {
 
+struct ConcatenateOpInterface
+    : public BufferizableOpInterface::ExternalModel<
+          ConcatenateOpInterface, sparse_tensor::ConcatenateOp> {
+  bool bufferizesToAllocation(Operation *op, OpResult opResult) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    return {};
+  }
+
+  bool isWritable(Operation *op, Value value,
+                  const AnalysisState &state) const {
+    return true;
+  }
+};
+
 struct ConvertOpInterface
     : public BufferizableOpInterface::ExternalModel<ConvertOpInterface,
                                                     sparse_tensor::ConvertOp> {
@@ -45,7 +73,7 @@ struct ConvertOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     return {};
   }
@@ -69,22 +97,17 @@ struct LoadOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
-    return {op->getOpResult(0)};
-  }
-
-  BufferRelation bufferRelation(Operation *op, OpResult opResult,
-                                const AnalysisState &state) const {
-    return BufferRelation::Equivalent;
+    return {{op->getOpResult(0), BufferRelation::Equivalent}};
   }
 };
 
 struct NewOpInterface
     : public BufferizableOpInterface::ExternalModel<NewOpInterface,
                                                     sparse_tensor::NewOp> {
-  bool isMemoryWrite(Operation *op, OpResult opResult,
-                     const AnalysisState &state) const {
+  bool resultBufferizesToMemoryWrite(Operation *op, OpResult opResult,
+                                     const AnalysisState &state) const {
     // NewOps allocate but do not write.
     return false;
   }
@@ -108,18 +131,93 @@ struct InsertOpInterface
     return true;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     // InsertOp returns an alias of its operand.
     assert(op->getNumResults() == 1);
-    return op->getResults();
+    return {{op->getOpResult(0), BufferRelation::Equivalent}};
+  }
+};
+
+struct NumberOfEntriesOpInterface
+    : public BufferizableOpInterface::ExternalModel<
+          NumberOfEntriesOpInterface, sparse_tensor::NumberOfEntriesOp> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
   }
 
-  BufferRelation bufferRelation(Operation *oo, OpResult opResult,
-                                const AnalysisState &state) const {
-    // InsertOp returns the same object (realloc should not invalidate
-    // aliases).
-    return BufferRelation::Equivalent;
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    return {};
+  }
+};
+
+struct ToIndicesOpInterface
+    : public BufferizableOpInterface::ExternalModel<
+          ToIndicesOpInterface, sparse_tensor::ToIndicesOp> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    // Potential writes into memory through the result of sparse_tensor.indices
+    // are not considered.
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    return {};
+  }
+};
+
+struct ToPointersOpInterface
+    : public BufferizableOpInterface::ExternalModel<
+          ToPointersOpInterface, sparse_tensor::ToPointersOp> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    // Potential writes into memory through the result of sparse_tensor.pointers
+    // are not considered.
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    return {};
+  }
+};
+
+struct ToValuesOpInterface
+    : public BufferizableOpInterface::ExternalModel<ToValuesOpInterface,
+                                                    sparse_tensor::ToValuesOp> {
+  bool bufferizesToMemoryRead(Operation *op, OpOperand &opOperand,
+                              const AnalysisState &state) const {
+    return true;
+  }
+
+  bool bufferizesToMemoryWrite(Operation *op, OpOperand &opOperand,
+                               const AnalysisState &state) const {
+    // Potential writes into memory through the result of sparse_tensor.values
+    // are not considered.
+    return false;
+  }
+
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
+                                            const AnalysisState &state) const {
+    return {};
   }
 };
 
@@ -129,11 +227,17 @@ struct InsertOpInterface
 
 void mlir::sparse_tensor::registerBufferizableOpInterfaceExternalModels(
     DialectRegistry &registry) {
-  registry.addExtension(
-      +[](MLIRContext *ctx, sparse_tensor::SparseTensorDialect *dialect) {
-        sparse_tensor::ConvertOp::attachInterface<ConvertOpInterface>(*ctx);
-        sparse_tensor::LoadOp::attachInterface<LoadOpInterface>(*ctx);
-        sparse_tensor::NewOp::attachInterface<NewOpInterface>(*ctx);
-        sparse_tensor::InsertOp::attachInterface<InsertOpInterface>(*ctx);
-      });
+  registry.addExtension(+[](MLIRContext *ctx,
+                            sparse_tensor::SparseTensorDialect *dialect) {
+    sparse_tensor::ConcatenateOp::attachInterface<ConcatenateOpInterface>(*ctx);
+    sparse_tensor::ConvertOp::attachInterface<ConvertOpInterface>(*ctx);
+    sparse_tensor::LoadOp::attachInterface<LoadOpInterface>(*ctx);
+    sparse_tensor::NewOp::attachInterface<NewOpInterface>(*ctx);
+    sparse_tensor::InsertOp::attachInterface<InsertOpInterface>(*ctx);
+    sparse_tensor::NumberOfEntriesOp::attachInterface<
+        NumberOfEntriesOpInterface>(*ctx);
+    sparse_tensor::ToIndicesOp::attachInterface<ToIndicesOpInterface>(*ctx);
+    sparse_tensor::ToPointersOp::attachInterface<ToPointersOpInterface>(*ctx);
+    sparse_tensor::ToValuesOp::attachInterface<ToValuesOpInterface>(*ctx);
+  });
 }

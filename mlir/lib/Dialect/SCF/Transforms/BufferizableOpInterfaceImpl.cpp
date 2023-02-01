@@ -57,7 +57,7 @@ struct ConditionOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     return {};
   }
@@ -104,9 +104,9 @@ struct ConditionOpInterface
 struct ExecuteRegionOpInterface
     : public BufferizableOpInterface::ExternalModel<ExecuteRegionOpInterface,
                                                     scf::ExecuteRegionOp> {
-  SmallVector<OpOperand *>
-  getAliasingOpOperand(Operation *op, OpResult opResult,
-                       const AnalysisState &state) const {
+  AliasingOpOperandList
+  getAliasingOpOperands(Operation *op, OpResult opResult,
+                        const AnalysisState &state) const {
     // ExecuteRegionOps do not have tensor OpOperands. The yielded value can be
     // any SSA value that is in scope. To allow for use-def chain traversal
     // through ExecuteRegionOps in the analysis, the corresponding yield value
@@ -120,19 +120,7 @@ struct ExecuteRegionOpInterface
     auto yieldOp = dyn_cast<scf::YieldOp>(
         executeRegionOp.getRegion().front().getTerminator());
     assert(yieldOp && "expected scf.yield terminator in scf.execute_region");
-    return {&yieldOp->getOpOperand(resultNum)};
-  }
-
-  // TODO: For better bufferization results, this could return `true` only if
-  // there is a memory write in the region.
-  bool isMemoryWrite(Operation *op, OpResult opResult,
-                     const AnalysisState &state) const {
-    // Similar to scf.if, results of this op are always considered memory writes
-    // in the analysis. This is a useful pattern for all ops that have tensor
-    // OpResults but no tensor OpOperands. By default, `isMemoryWrite` is
-    // implemented in terms of `bufferizesToMemoryWrite`, which does not work on
-    // ops without OpOperands.
-    return true;
+    return {{&yieldOp->getOpOperand(resultNum), BufferRelation::Equivalent}};
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
@@ -166,19 +154,14 @@ struct ExecuteRegionOpInterface
 
     return success();
   }
-
-  BufferRelation bufferRelation(Operation *op, OpResult opResult,
-                                const AnalysisState &state) const {
-    return BufferRelation::Equivalent;
-  }
 };
 
 /// Bufferization of scf.if. Replace with a new scf.if that yields memrefs.
 struct IfOpInterface
     : public BufferizableOpInterface::ExternalModel<IfOpInterface, scf::IfOp> {
-  SmallVector<OpOperand *>
-  getAliasingOpOperand(Operation *op, OpResult opResult,
-                       const AnalysisState &state) const {
+  AliasingOpOperandList
+  getAliasingOpOperands(Operation *op, OpResult opResult,
+                        const AnalysisState &state) const {
     // IfOps do not have tensor OpOperands. The yielded value can be any SSA
     // value that is in scope. To allow for use-def chain traversal through
     // IfOps in the analysis, both corresponding yield values from the then/else
@@ -186,39 +169,10 @@ struct IfOpInterface
     auto ifOp = cast<scf::IfOp>(op);
     size_t resultNum = std::distance(op->getOpResults().begin(),
                                      llvm::find(op->getOpResults(), opResult));
-    return {&ifOp.thenYield()->getOpOperand(resultNum),
-            &ifOp.elseYield()->getOpOperand(resultNum)};
-  }
-
-  // TODO: For better bufferization results, this could return `true` only if
-  // there is a memory write in one (or both) of the branches. Since this is not
-  // allowed at the moment, we should never encounter scf.ifs that yield
-  // unmodified tensors. Such scf.yield ops could just fold away.
-  bool isMemoryWrite(Operation *op, OpResult opResult,
-                     const AnalysisState &state) const {
-    // IfOp results are always considered memory writes in the analysis. This
-    // design decision simplifies the analysis considerably. E.g., consider the
-    // following test case:
-    //
-    // %0 = "some_writing_op" : tensor<?xf32>
-    // %r = scf.if %c -> (tensor<?xf32>) {
-    //   scf.yield %0
-    // } else {
-    //   %1 = "another_writing_op"(%0) : tensor<?xf32>
-    // }
-    // "some_reading_op"(%r)
-    //
-    // "another_writing_op" in the above example should be able to bufferize
-    // inplace in the absence of another read of %0. However, if the scf.if op
-    // would not be considered a "write", the analysis would detect the
-    // following conflict:
-    //
-    // * read = some_reading_op
-    // * lastWrite = %0  (Note: The last write of %r would be a set: {%0, %1}.)
-    // * conflictingWrite = %1
-    //
-    // For more details, check the "scf.IfOp" section of the design document.
-    return true;
+    OpOperand *thenOperand = &ifOp.thenYield()->getOpOperand(resultNum);
+    OpOperand *elseOperand = &ifOp.elseYield()->getOpOperand(resultNum);
+    return {{thenOperand, BufferRelation::Equivalent},
+            {elseOperand, BufferRelation::Equivalent}};
   }
 
   LogicalResult bufferize(Operation *op, RewriterBase &rewriter,
@@ -300,19 +254,6 @@ struct IfOpInterface
     // Layout maps are different: Promote to fully dynamic layout map.
     return getMemRefTypeWithFullyDynamicLayout(
         opResult.getType().cast<TensorType>(), thenBufferType.getMemorySpace());
-  }
-
-  BufferRelation bufferRelation(Operation *op, OpResult opResult,
-                                const AnalysisState &state) const {
-    // IfOp results are equivalent to their corresponding yield values if both
-    // yield values are equivalent to each other.
-    auto bufferizableOp = cast<BufferizableOpInterface>(op);
-    SmallVector<OpOperand *> yieldValues =
-        bufferizableOp.getAliasingOpOperand(opResult, state);
-    assert(yieldValues.size() == 2 && "expected 2 yield values");
-    bool equivalentYields = state.areEquivalentBufferizedValues(
-        yieldValues[0]->get(), yieldValues[1]->get());
-    return equivalentYields ? BufferRelation::Equivalent : BufferRelation::None;
   }
 };
 
@@ -485,10 +426,13 @@ struct ForOpInterface
     return true;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     auto forOp = cast<scf::ForOp>(op);
-    return {forOp.getResultForOpOperand(opOperand)};
+    OpResult opResult = forOp.getResultForOpOperand(opOperand);
+    BufferRelation relation = bufferRelation(op, opResult, state);
+    return {{opResult, relation,
+             /*isDefinite=*/relation == BufferRelation::Equivalent}};
   }
 
   BufferRelation bufferRelation(Operation *op, OpResult opResult,
@@ -502,7 +446,8 @@ struct ForOpInterface
         cast<scf::YieldOp>(forOp.getLoopBody().front().getTerminator());
     bool equivalentYield = state.areEquivalentBufferizedValues(
         bbArg, yieldOp->getOperand(opResult.getResultNumber()));
-    return equivalentYield ? BufferRelation::Equivalent : BufferRelation::None;
+    return equivalentYield ? BufferRelation::Equivalent
+                           : BufferRelation::Unknown;
   }
 
   bool isWritable(Operation *op, Value value,
@@ -698,7 +643,7 @@ struct WhileOpInterface
     return true;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     auto whileOp = cast<scf::WhileOp>(op);
     unsigned int idx = opOperand.getOperandNumber();
@@ -710,7 +655,10 @@ struct WhileOpInterface
       return {};
 
     // The only aliasing OpResult may be the one at the same index.
-    return {whileOp->getResult(idx)};
+    OpResult opResult = whileOp->getResult(idx);
+    BufferRelation relation = bufferRelation(op, opResult, state);
+    return {{opResult, relation,
+             /*isDefinite=*/relation == BufferRelation::Equivalent}};
   }
 
   BufferRelation bufferRelation(Operation *op, OpResult opResult,
@@ -723,10 +671,10 @@ struct WhileOpInterface
 
     // The "before" region bbArgs and the OpResults may not match.
     if (resultNumber >= whileOp.getBeforeArguments().size())
-      return BufferRelation::None;
+      return BufferRelation::Unknown;
     if (opResult.getType() !=
         whileOp.getBeforeArguments()[resultNumber].getType())
-      return BufferRelation::None;
+      return BufferRelation::Unknown;
 
     auto conditionOp = whileOp.getConditionOp();
     BlockArgument conditionBbArg = whileOp.getBeforeArguments()[resultNumber];
@@ -741,7 +689,7 @@ struct WhileOpInterface
         state.areEquivalentBufferizedValues(bodyBbArg, yieldOperand);
 
     return equivCondition && equivYield ? BufferRelation::Equivalent
-                                        : BufferRelation::None;
+                                        : BufferRelation::Unknown;
   }
 
   bool isWritable(Operation *op, Value value,
@@ -993,12 +941,21 @@ struct YieldOpInterface
     return false;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
-    if (isa<scf::IfOp>(op->getParentOp()))
-      return {op->getParentOp()->getResult(opOperand.getOperandNumber())};
+    if (auto ifOp = dyn_cast<scf::IfOp>(op->getParentOp())) {
+      Region &otherCase =
+          ifOp->getRegion((op->getParentRegion()->getRegionNumber() + 1) % 2);
+      auto otherYieldOp = cast<scf::YieldOp>(otherCase.back().back());
+      bool equivalentYields = state.areEquivalentBufferizedValues(
+          opOperand.get(),
+          otherYieldOp->getOperand(opOperand.getOperandNumber()));
+      return {{op->getParentOp()->getResult(opOperand.getOperandNumber()),
+               BufferRelation::Equivalent, /*isDefinite=*/equivalentYields}};
+    }
     if (isa<scf::ExecuteRegionOp>(op->getParentOp()))
-      return {op->getParentOp()->getResult(opOperand.getOperandNumber())};
+      return {{op->getParentOp()->getResult(opOperand.getOperandNumber()),
+               BufferRelation::Equivalent}};
     return {};
   }
 
@@ -1092,15 +1049,11 @@ struct ForeachThreadOpInterface
     return true;
   }
 
-  SmallVector<OpResult> getAliasingOpResult(Operation *op, OpOperand &opOperand,
+  AliasingOpResultList getAliasingOpResults(Operation *op, OpOperand &opOperand,
                                             const AnalysisState &state) const {
     auto foreachThreadOp = cast<ForeachThreadOp>(op);
-    return {foreachThreadOp.getTiedOpResult(&opOperand)};
-  }
-
-  BufferRelation bufferRelation(Operation *op, OpResult opResult,
-                                const AnalysisState &state) const {
-    return BufferRelation::Equivalent;
+    return {{{foreachThreadOp.getTiedOpResult(&opOperand),
+              BufferRelation::Equivalent}}};
   }
 
   bool isWritable(Operation *op, Value value,

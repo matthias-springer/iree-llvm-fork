@@ -146,8 +146,8 @@ void BufferizationAliasInfo::bufferizeInPlace(OpOperand &operand,
   if (inplaceBufferized.contains(&operand))
     return;
   markInPlace(operand);
-  for (OpResult result : state.getAliasingOpResults(operand))
-    aliasInfo.unionSets(result, operand.get());
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand))
+    aliasInfo.unionSets(alias.opResult, operand.get());
   ++statNumTensorInPlace;
 }
 
@@ -637,7 +637,8 @@ static bool hasReadAfterWriteInterference(
         // use.
         AliasingOpResultList aliases =
             state.getAliasingOpResults(*uConflictingWrite);
-        if (aliases.size() == 1 && aliases[0] == definition) {
+        if (aliases.getNumAliases() == 1 &&
+            aliases.getAliases()[0].opResult == definition) {
           LLVM_DEBUG(llvm::dbgs()
                      << "    no conflict: definition and write are same\n");
           continue;
@@ -696,9 +697,10 @@ static void getAliasingReads(DenseSet<OpOperand *> &res, Value root,
       // there would then be no flow of data from the extract_slice operand to
       // its result's uses.)
       if (!state.bufferizesToMemoryWrite(use)) {
-        AliasingOpResultList opResults = state.getAliasingOpResults(use);
-        if (llvm::any_of(opResults,
-                         [&](OpResult r) { return state.isValueRead(r); }))
+        AliasingOpResultList aliases = state.getAliasingOpResults(use);
+        if (llvm::any_of(aliases, [&](AliasingOpResult a) {
+              return state.isValueRead(a.opResult);
+            }))
           res.insert(&use);
       }
     }
@@ -742,9 +744,9 @@ static bool wouldCreateReadAfterWriteInterference(
   DenseSet<OpOperand *> usesRead, usesWrite;
   getAliasingReads(usesRead, operand.get(), aliasInfo, state);
   getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
-  for (OpResult result : state.getAliasingOpResults(operand)) {
-    getAliasingReads(usesRead, result, aliasInfo, state);
-    getAliasingInplaceWrites(usesWrite, result, aliasInfo, state);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
+    getAliasingReads(usesRead, alias.opResult, aliasInfo, state);
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
   }
   if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
     usesWrite.insert(&operand);
@@ -795,11 +797,10 @@ hasPrecedingAliasingNonWritableTensor(Value value, OpOperand *currentOpOperand,
       continue;
 
     // Follow reverse SSA use-def chain.
-    AliasingOpOperandList aliasingOpOperands =
-        state.getAliasingOpOperands(opResult);
-    for (OpOperand *opOperand : aliasingOpOperands)
-      if (aliasInfo.isInPlace(*opOperand) || currentOpOperand == opOperand)
-        worklist.push_back(opOperand->get());
+    for (AliasingOpOperand alias : state.getAliasingOpOperands(opResult))
+      if (aliasInfo.isInPlace(*alias.opOperand) ||
+          currentOpOperand == alias.opOperand)
+        worklist.push_back(alias.opOperand->get());
   }
   return false;
 }
@@ -812,8 +813,8 @@ static bool wouldCreateWriteToNonWritableBuffer(
   // Collect writes of all aliases of OpOperand and OpResult.
   DenseSet<OpOperand *> usesWrite;
   getAliasingInplaceWrites(usesWrite, operand.get(), aliasInfo, state);
-  for (OpResult result : state.getAliasingOpResults(operand)) {
-    getAliasingInplaceWrites(usesWrite, result, aliasInfo, state);
+  for (AliasingOpResult alias : state.getAliasingOpResults(operand)) {
+    getAliasingInplaceWrites(usesWrite, alias.opResult, aliasInfo, state);
   }
   if (!checkConsistencyOnly && state.bufferizesToMemoryWrite(operand))
     usesWrite.insert(&operand);
@@ -957,10 +958,11 @@ static void equivalenceAnalysis(SmallVector<Operation *> &ops,
             // union equivalence sets.
             continue;
           AliasingOpResultList aliases = state.getAliasingOpResults(opOperand);
-          for (OpResult alias : aliases) {
-            if (cast<BufferizableOpInterface>(alias.getDefiningOp())
-                    .bufferRelation(alias, state) == BufferRelation::Equivalent)
-              aliasInfo.unionEquivalenceClasses(alias, opOperand.get());
+          for (AliasingOpResult alias : aliases) {
+            if (alias.relation == BufferRelation::Equivalent &&
+                alias.isDefinite)
+              aliasInfo.unionEquivalenceClasses(alias.opResult,
+                                                opOperand.get());
           }
         }
       }

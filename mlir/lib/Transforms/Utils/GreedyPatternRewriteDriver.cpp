@@ -121,6 +121,12 @@ private:
 
   /// The low-level pattern applicator.
   PatternApplicator matcher;
+
+#ifndef NDEBUG
+  DenseMap<Operation *, OperationFingerPrint> fingerprints;
+
+  Operation *fingerprintTopLevel = nullptr;
+#endif // NDEBUG
 };
 } // namespace
 
@@ -225,12 +231,40 @@ bool GreedyPatternRewriteDriver::processWorklist() {
         return success();
       };
 
+
+      // Compute finger print to detect faulty rewrite patterns.
+      auto clearFingerprints =
+          llvm::make_scope_exit([&]() { fingerprints.clear(); });
+      fingerprintTopLevel = config.scope ? config.scope->getParentOp() : op;
+      llvm::errs() << "FP TOP-LEVEL: " << fingerprintTopLevel << "\n";
+      llvm::errs() << "name: " << fingerprintTopLevel->getName() << "\n";
+
+      fingerprintTopLevel->walk(
+          [&](Operation *op) { fingerprints.try_emplace(op, op); });
+      OperationFingerPrint &beforeFingerPrint =
+          fingerprints.find(fingerprintTopLevel)->second;
+
       LogicalResult matchResult =
           matcher.matchAndRewrite(op, *this, canApply, onFailure, onSuccess);
-      if (succeeded(matchResult))
-        LLVM_DEBUG(logResultWithLine("success", "pattern matched"));
-      else
-        LLVM_DEBUG(logResultWithLine("failure", "pattern failed to match"));
+      OperationFingerPrint afterFingerPrint(fingerprintTopLevel);
+      if (succeeded(matchResult)) {
+      LLVM_DEBUG(logResultWithLine("success", "pattern matched"));
+      assert(beforeFingerPrint != afterFingerPrint &&
+             "pattern returned success but IR did not change");
+      fingerprintTopLevel->walk([&](Operation *op) {
+        if (op == fingerprintTopLevel)
+          return;
+        auto it = fingerprints.find(op);
+        if (it != fingerprints.end()) {
+          assert(it->second == OperationFingerPrint(op) &&
+                 "operation finger print changed");
+        }
+      });
+      } else {
+      LLVM_DEBUG(logResultWithLine("failure", "pattern failed to match"));
+      assert(beforeFingerPrint == afterFingerPrint &&
+             "pattern returned failure but IR did change");
+      }
 #else
       LogicalResult matchResult = matcher.matchAndRewrite(op, *this);
 #endif
@@ -245,6 +279,7 @@ bool GreedyPatternRewriteDriver::processWorklist() {
 }
 
 void GreedyPatternRewriteDriver::addToWorklist(Operation *op) {
+  assert(op && "expected valid op");
   // Gather potential ancestors while looking for a "scope" parent region.
   SmallVector<Operation *, 8> ancestors;
   Region *region = nullptr;
@@ -303,6 +338,13 @@ void GreedyPatternRewriteDriver::notifyOperationInserted(Operation *op) {
     logger.startLine() << "** Insert  : '" << op->getName() << "'(" << op
                        << ")\n";
   });
+#ifndef NDEBUG
+  Operation *fpOp = op->getParentOp();
+  while (fpOp && fpOp != fingerprintTopLevel) {
+    fingerprints.erase(fpOp);
+    fpOp = fpOp->getParentOp();
+  }
+#endif // NDEBUG
   if (config.listener)
     config.listener->notifyOperationInserted(op);
   if (config.strictMode == GreedyRewriteStrictness::ExistingAndNewOps)
@@ -315,6 +357,13 @@ void GreedyPatternRewriteDriver::notifyOperationModified(Operation *op) {
     logger.startLine() << "** Modified: '" << op->getName() << "'(" << op
                        << ")\n";
   });
+#ifndef NDEBUG
+  Operation *fpOp = op;
+  while (fpOp && fpOp != fingerprintTopLevel) {
+    fingerprints.erase(fpOp);
+    fpOp = fpOp->getParentOp();
+  }
+#endif // NDEBUG
   addToWorklist(op);
 }
 
@@ -344,6 +393,16 @@ void GreedyPatternRewriteDriver::notifyOperationRemoved(Operation *op) {
   op->walk([this](Operation *operation) {
     removeFromWorklist(operation);
     folder.notifyRemoval(operation);
+
+#ifndef NDEBUG
+    {
+      Operation *op = operation;
+      while (op && op != fingerprintTopLevel) {
+        fingerprints.erase(op);
+        op = op->getParentOp();
+      }
+    }
+#endif // NDEBUG
   });
 
   if (config.strictMode != GreedyRewriteStrictness::AnyOp)

@@ -759,7 +759,7 @@ struct WarpOpTransferRead : public OpRewritePattern<WarpExecuteOnLane0Op> {
         read.getLoc(), distributedVal.getType(), read.getSource(), indices,
         read.getPermutationMapAttr(), read.getPadding(), read.getMask(),
         read.getInBoundsAttr());
-    distributedVal.replaceAllUsesWith(newRead);
+    rewriter.replaceAllUsesWith(distributedVal, newRead);
     return success();
   }
 };
@@ -855,7 +855,7 @@ struct WarpOpForwardOperand : public OpRewritePattern<WarpExecuteOnLane0Op> {
     }
     if (!valForwarded)
       return failure();
-    warpOp.getResult(resultIndex).replaceAllUsesWith(valForwarded);
+    rewriter.replaceAllUsesWith(warpOp.getResult(resultIndex), valForwarded);
     return success();
   }
 };
@@ -880,7 +880,7 @@ struct WarpOpBroadcast : public OpRewritePattern<WarpExecuteOnLane0Op> {
     rewriter.setInsertionPointAfter(newWarpOp);
     Value broadcasted = rewriter.create<vector::BroadcastOp>(
         loc, destVecType, newWarpOp->getResult(newRetIndices[0]));
-    newWarpOp->getResult(operandNumber).replaceAllUsesWith(broadcasted);
+    rewriter.replaceAllUsesWith(newWarpOp->getResult(operandNumber), broadcasted);
     return success();
   }
 };

@@ -261,14 +261,14 @@ public:
         ReplaceWithNewOp,
         EraseOp,
         ChangeBlockOp,
-        ImplicitChangeOp
+        ImplicitChangeOp,
+        MergeBlocks
         // clang-format on
         >(ctx);
     SmallVector<Operation *> ops;
     getOperation()->walk([&](Operation *op) {
-      StringRef opName = op->getName().getStringRef();
-      if (opName == "test.insert_same_op" || opName == "test.change_block_op" ||
-          opName == "test.replace_with_new_op" || opName == "test.erase_op") {
+      if (op->hasAttr("worklist")) {
+        op->removeAttr("worklist");
         ops.push_back(op);
       }
     });
@@ -357,6 +357,26 @@ private:
     LogicalResult matchAndRewrite(Operation *op,
                                   PatternRewriter &rewriter) const override {
       rewriter.eraseOp(op);
+      return success();
+    }
+  };
+
+  // Users of replaced block arguments are revisited after merging two blocks.
+  class MergeBlocks : public OpRewritePattern<TestMergeBlocksOp> {
+  public:
+    using OpRewritePattern<TestMergeBlocksOp>::OpRewritePattern;
+
+    LogicalResult matchAndRewrite(TestMergeBlocksOp op,
+                                  PatternRewriter &rewriter) const override {
+      if (op.getBody().getBlocks().size() != 2)
+        return failure();
+      Block &destBlock = op.getBody().front();
+      Operation *branchOp = destBlock.getTerminator();
+      Block *sourceBlock = &*(std::next(op.getBody().begin()));
+      auto succOperands = branchOp->getOperands();
+      SmallVector<Value> replacements(succOperands);
+      rewriter.eraseOp(branchOp);
+      rewriter.mergeBlocks(sourceBlock, &destBlock, replacements);
       return success();
     }
   };
